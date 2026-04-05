@@ -1,5 +1,9 @@
 export const metadata = {
   title: "Beer Bar 張本",
+  robots: {
+    index: false,
+    follow: false,
+  },
 };
 
 export default function RootLayout({ children }) {
