@@ -184,6 +184,8 @@
 			let chatHistory = [];
 			let isProcessing = false;
 			let currentAudio = null;
+			let silenceTimer = null;
+			const SILENCE_TIMEOUT = 3000; // 3秒無音で停止
 
 			// Web Speech API 初期化
 			const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -191,8 +193,8 @@
 			if (SpeechRecognition) {
 				recognition = new SpeechRecognition();
 				recognition.lang = 'ja-JP';
-				recognition.interimResults = false;
-				recognition.continuous = false;
+				recognition.interimResults = true;
+				recognition.continuous = true;
 			}
 
 			// 張本設定（システムプロンプト）
@@ -684,39 +686,61 @@ FEW-SHOT: 実演例（この温度感を参考にすること）
 				}
 			}
 
+			// 無音タイマーをリセット
+			function resetSilenceTimer() {
+				clearTimeout(silenceTimer);
+				silenceTimer = setTimeout(() => {
+					if (recognition && micButton.classList.contains('mic-recording')) {
+						recognition.stop();
+					}
+				}, SILENCE_TIMEOUT);
+			}
+
 			// マイクボタンのイベント
 			micButton.addEventListener("click", () => {
 				if (isProcessing || !recognition) return;
 
 				if (micButton.classList.contains('mic-recording')) {
+					clearTimeout(silenceTimer);
 					recognition.stop();
 					return;
 				}
 
 				setMicState('recording');
 				recognition.start();
+				resetSilenceTimer();
 			});
 
 			// 音声認識イベント
 			if (recognition) {
+				let finalTranscript = '';
+
 				recognition.onresult = (event) => {
-					const transcript = event.results[0][0].transcript;
-					setMicState('processing');
-					handleUserInput(transcript);
+					// 無音タイマーリセット（発話があるたびに延長）
+					resetSilenceTimer();
+
+					finalTranscript = '';
+					for (let i = 0; i < event.results.length; i++) {
+						if (event.results[i].isFinal) {
+							finalTranscript += event.results[i][0].transcript;
+						}
+					}
 				};
 
 				recognition.onerror = (event) => {
 					console.error('Speech recognition error:', event.error);
-					if (event.error === 'no-speech') {
-						setMicState('ready');
-					} else {
-						setMicState('ready');
-					}
+					clearTimeout(silenceTimer);
+					setMicState('ready');
 					isProcessing = false;
 				};
 
 				recognition.onend = () => {
-					if (micButton.classList.contains('mic-recording')) {
+					clearTimeout(silenceTimer);
+					if (finalTranscript.trim()) {
+						setMicState('processing');
+						handleUserInput(finalTranscript.trim());
+						finalTranscript = '';
+					} else {
 						setMicState('ready');
 					}
 				};
