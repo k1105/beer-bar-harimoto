@@ -103,18 +103,43 @@ FEW-SHOT: 実演例（この温度感を参考にすること）
 状況設定
 ═══════════════════════════════════
 
-あなたはサントリードリームマッチの会場にある特別な酒場「Beer Bar 張本」にいます。来場者がやってきてエピソードを話し、あなたが最終的に「喝！」か「あっぱれ！」を判定します。プレモルを一杯出しながら、3ターンの対話で判定に至ります。`;
+あなたはサントリードリームマッチの会場にある特別な酒場「Beer Bar 張本」にいます。来場者がやってきてエピソードを話し、あなたが最終的に「喝！」か「あっぱれ！」を判定します。プレモルを一杯出しながら、3ターンの対話で判定に至ります。
+
+═══════════════════════════════════
+音声合成向けの補足
+═══════════════════════════════════
+
+あなたの出力は音声合成で読み上げられます。キャラクターの語り口は崩さず、以下だけ注意すること。
+
+- 読みが曖昧な漢字はひらがなで書く（例：「流石→さすが」「所以→ゆえん」）
+- 顔文字や「w」「（笑）」は使わない
+- 英語はカタカナにする
+
+※話し方のテンポや表現の豊かさは最優先。短くしすぎたり簡素にしすぎたりしないこと。張本らしい語り、ユーモア、毒舌、人情味をたっぷり出すこと。`;
 
 function parseJudgment(text) {
   let judgment = null;
   let cleanText = text;
-  if (text.includes("【判定：喝！】")) {
+
+  // 柔軟にマッチ（括弧の全角半角、スペース、感嘆符の有無を許容）
+  const katsuPattern = /[【\[]判定[：:]?\s*喝[！!]?[】\]]?/g;
+  const apparePattern = /[【\[]判定[：:]?\s*あっぱれ[！!]?[】\]]?/g;
+
+  if (katsuPattern.test(text)) {
     judgment = "katsu";
-    cleanText = text.replace(/【判定：喝！】/g, "").trim();
-  } else if (text.includes("【判定：あっぱれ！】")) {
+    cleanText = text.replace(katsuPattern, "").trim();
+  } else if (apparePattern.test(text)) {
     judgment = "appare";
-    cleanText = text.replace(/【判定：あっぱれ！】/g, "").trim();
+    cleanText = text.replace(apparePattern, "").trim();
+  } else if (/喝[！!]/.test(text)) {
+    // タグなしでも「喝！」が文末付近にあれば検出
+    judgment = "katsu";
+    cleanText = text;
+  } else if (/あっぱれ[！!]/.test(text)) {
+    judgment = "appare";
+    cleanText = text;
   }
+
   return { judgment, cleanText };
 }
 
@@ -145,9 +170,13 @@ export default function Home() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        text,
+        text: text + "。  ",
         model_id: "eleven_multilingual_v2",
-        voice_settings: { stability: 0.5, similarity_boost: 0.8, style: 0.3 },
+        voice_settings: {
+          stability: 0.55,
+          similarity_boost: 0.6,
+          style: 0.15,
+        },
       }),
     });
     if (!response.ok) { console.error("ElevenLabs API error:", response.status); return; }
@@ -169,7 +198,7 @@ export default function Home() {
     if (currentTurnRef.current === 1) {
       turnInstruction = `\n【現在の状況：ターン2（深掘りと共感）】\nユーザーが今日のエピソードを話し始めました。\nエピソードの具体的なキーワードに触れ、自分の経験や野球の話に引きつけて共感してください。\n追加で1つだけ質問をしてください。\n※絶対に最終判定（喝！/あっぱれ！）はしないでください。判定タグも出力しないでください。`;
     } else if (currentTurnRef.current === 2) {
-      turnInstruction = `\n【現在の状況：ターン3（最終判定）】\nユーザーの返答を受けて、いよいよ最終判定を下します。\n1. まず一呼吸置く演出（「……うん。」等）を入れてください。\n2. 判定理由を1-2文で述べてください。\n3. 最後に「喝！」または「あっぱれ！」を宣言し、テキストの最後（または独立した行）に必ず【判定：喝！】または【判定：あっぱれ！】という文字列を含めてください。`;
+      turnInstruction = `\n【最重要指示：このターンで必ず判定を出すこと】\n\nこれが最後のターンです。どんな内容であっても、必ず「喝」か「あっぱれ」の判定を下してください。\n相手が「話すことがない」「別に」等と言った場合でも、その態度自体を判定材料にして判定してください。判定を出さない返答は許可されていません。\n\n返答の流れ：\n1. 張本らしく一呼吸置いてから語る\n2. 相手の話や態度に対して、張本の経験を交えながら判定理由を述べる\n3. 盛り上がりを作ってから「喝！」または「あっぱれ！」を宣言する\n4. 返答の一番最後の行に、必ず以下のタグを書く（これがないとシステムが判定を認識できない）：\n\n【判定：喝！】\nまたは\n【判定：あっぱれ！】`;
     }
 
     const payload = {
@@ -209,6 +238,7 @@ export default function Home() {
     scrollToBottom();
 
     const responseText = await callGeminiAPI();
+    console.log(`[Turn ${currentTurnRef.current}] Gemini response:`, responseText);
 
     setMessages((prev) => prev.filter((m) => m.sender !== "typing"));
 
@@ -223,6 +253,7 @@ export default function Home() {
       setMicState("ready");
     } else if (currentTurnRef.current === 2) {
       const parsed = parseJudgment(responseText);
+      console.log("[Judgment parse]", parsed);
       setMessages((prev) => [...prev, { sender: "harimoto", text: parsed.cleanText }]);
       setMicState("speaking");
       scrollToBottom();
